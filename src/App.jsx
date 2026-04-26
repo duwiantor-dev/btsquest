@@ -140,6 +140,7 @@ function defaultState() {
     salesMapping: { picColumn: "", salesColumn: "", groupColumn: "" },
     questInstances: buildInitialQuestInstances(),
     questTemplates: templateSeed,
+    systemPaused: false,
   };
 }
 
@@ -204,6 +205,7 @@ function App() {
 
   const me = state.auth?.role;
   const isAdmin = me === "ADMIN";
+  const systemPaused = Boolean(state.systemPaused);
 
   const perPlayerStats = useMemo(() => {
     return PLAYERS.map((player) => {
@@ -287,6 +289,10 @@ function App() {
     setTab("dashboard");
   }
 
+  function togglePauseAll() {
+    setState((prev) => ({ ...prev, systemPaused: !Boolean(prev.systemPaused) }));
+  }
+
   function updateQuest(id, patch) {
     setState((prev) => ({
       ...prev,
@@ -295,15 +301,17 @@ function App() {
   }
 
   function submitQuest(id, proofLink) {
+    if (systemPaused) return;
     updateQuest(id, { status: "submitted", proofLink, submittedAt: new Date().toISOString() });
   }
 
   function reviewQuest(id, status) {
+    if (systemPaused) return;
     updateQuest(id, { status, reviewedAt: new Date().toISOString() });
   }
 
   function addAdminQuest() {
-    if (!newQuest.title.trim()) return;
+    if (systemPaused || !newQuest.title.trim()) return;
     const targets = newQuest.assignedTo === "ALL" ? PLAYERS : [newQuest.assignedTo];
     const additions = targets.map((player) => ({
       id: makeId("quest"),
@@ -457,10 +465,30 @@ function App() {
             ))}
           </div>
 
+          {isAdmin && (
+            <div style={styles.sidePanel}>
+              <div style={styles.panelLabel}>GM Control</div>
+              <button
+                onClick={togglePauseAll}
+                style={systemPaused ? styles.resumeAllBtn : styles.pauseAllBtn}
+              >
+                {systemPaused ? "Resume All" : "Pause All"}
+              </button>
+              <div style={styles.muted}>
+                {systemPaused ? "Sistem sedang hold. Submit, approve, reject, dan tambah quest dimatikan sementara." : "Klik untuk hold semua aksi quest."}
+              </div>
+            </div>
+          )}
+
           <button onClick={logout} style={styles.logoutBtn}>Logout</button>
         </aside>
 
         <main style={styles.mainArea}>
+          {systemPaused && (
+            <div style={styles.pauseBanner}>
+              Sistem sedang PAUSE ALL oleh GM. Semua aksi quest di-hold sementara.
+            </div>
+          )}
           {!isAdmin && tab === "dashboard" && currentPlayerStats && (
             <>
               <section style={styles.heroCard}>
@@ -527,7 +555,7 @@ function App() {
                   <div style={styles.empty}>Belum ada quest submitted.</div>
                 ) : (
                   state.questInstances.filter((q) => q.status === "submitted").map((quest) => (
-                    <QuestCard key={quest.id} quest={quest} adminMode onApprove={() => reviewQuest(quest.id, "approved")} onReject={() => reviewQuest(quest.id, "rejected")} />
+                    <QuestCard key={quest.id} quest={quest} adminMode systemPaused={systemPaused} onApprove={() => reviewQuest(quest.id, "approved")} onReject={() => reviewQuest(quest.id, "rejected")} />
                   ))
                 )}
               </section>
@@ -545,6 +573,7 @@ function App() {
               onApprove={reviewQuest}
               onDelete={deleteQuest}
               playerStats={currentPlayerStats}
+              systemPaused={systemPaused}
             />
           )}
 
@@ -671,12 +700,12 @@ function App() {
               </div>
               <textarea style={styles.textarea} placeholder="Deskripsi quest" value={newQuest.description} onChange={(e) => setNewQuest((p) => ({ ...p, description: e.target.value }))} />
               <div style={styles.actionsRow}>
-                <button onClick={addAdminQuest} style={styles.mainButton}>Tambah Quest</button>
+                <button onClick={addAdminQuest} style={systemPaused ? styles.disabledBtn : styles.mainButton} disabled={systemPaused}>Tambah Quest</button>
               </div>
               <div style={{ marginTop: 24 }}>
                 <div style={styles.panelTitle}>Semua Quest Instance</div>
                 {sortQuestSections(state.questInstances).map((quest) => (
-                  <QuestCard key={quest.id} quest={quest} adminMode compact onApprove={() => reviewQuest(quest.id, "approved")} onReject={() => reviewQuest(quest.id, "rejected")} onDelete={() => deleteQuest(quest.id)} />
+                  <QuestCard key={quest.id} quest={quest} adminMode compact systemPaused={systemPaused} onApprove={() => reviewQuest(quest.id, "approved")} onReject={() => reviewQuest(quest.id, "rejected")} onDelete={() => deleteQuest(quest.id)} />
                 ))}
               </div>
             </section>
@@ -687,7 +716,7 @@ function App() {
   );
 }
 
-function QuestArchiveScreen({ groupedQuests, selectedQuest, onSelectQuest, me, isAdmin, onSubmit, onApprove, onDelete, playerStats }) {
+function QuestArchiveScreen({ groupedQuests, selectedQuest, onSelectQuest, me, isAdmin, onSubmit, onApprove, onDelete, playerStats, systemPaused }) {
   const sections = [
     ["main", "Main Quests", "Archon-style quest prioritas tinggi"],
     ["daily", "Daily Commissions", "Quest job/class khusus masing-masing PIC"],
@@ -750,6 +779,7 @@ function QuestArchiveScreen({ groupedQuests, selectedQuest, onSelectQuest, me, i
             onApprove={onApprove}
             onDelete={onDelete}
             playerStats={playerStats}
+            systemPaused={systemPaused}
           />
         ) : (
           <div style={styles.panel}>Belum ada quest.</div>
@@ -759,7 +789,7 @@ function QuestArchiveScreen({ groupedQuests, selectedQuest, onSelectQuest, me, i
   );
 }
 
-function QuestDetailPanel({ quest, me, adminMode, onSubmit, onApprove, onDelete, playerStats }) {
+function QuestDetailPanel({ quest, me, adminMode, onSubmit, onApprove, onDelete, playerStats, systemPaused }) {
   const badge = statusBadgeStyles[quest.status] || statusBadgeStyles.available;
   const typeStyle = typeBadgeStyles[quest.questType] || typeBadgeStyles.daily;
   const showConflict = quest.status === "locked" || quest.status === "expired";
@@ -812,6 +842,7 @@ function QuestDetailPanel({ quest, me, adminMode, onSubmit, onApprove, onDelete,
         onApprove={() => onApprove(quest.id, "approved")}
         onReject={() => onApprove(quest.id, "rejected")}
         onDelete={() => onDelete(quest.id)}
+        systemPaused={systemPaused}
         wide
       />
 
@@ -827,9 +858,9 @@ function QuestDetailPanel({ quest, me, adminMode, onSubmit, onApprove, onDelete,
   );
 }
 
-function QuestCard({ quest, me, adminMode, onSubmit, onApprove, onReject, onDelete, compact = false, wide = false }) {
+function QuestCard({ quest, me, adminMode, onSubmit, onApprove, onReject, onDelete, compact = false, wide = false, systemPaused = false }) {
   const [proof, setProof] = useState(quest.proofLink || "");
-  const disabled = quest.status === "locked" || quest.status === "expired";
+  const disabled = systemPaused || quest.status === "locked" || quest.status === "expired";
   const badge = statusBadgeStyles[quest.status] || statusBadgeStyles.available;
   const typeStyle = typeBadgeStyles[quest.questType] || typeBadgeStyles.daily;
 
@@ -848,8 +879,8 @@ function QuestCard({ quest, me, adminMode, onSubmit, onApprove, onReject, onDele
         </div>
         {adminMode && (
           <div style={styles.adminActionCol}>
-            {quest.status === "submitted" && <button onClick={onApprove} style={styles.approveBtn}>Approve</button>}
-            {quest.status === "submitted" && <button onClick={onReject} style={styles.rejectBtn}>Reject</button>}
+            {quest.status === "submitted" && <button onClick={onApprove} style={systemPaused ? styles.disabledBtn : styles.approveBtn} disabled={systemPaused}>Approve</button>}
+            {quest.status === "submitted" && <button onClick={onReject} style={systemPaused ? styles.disabledBtn : styles.rejectBtn} disabled={systemPaused}>Reject</button>}
             <button onClick={onDelete} style={styles.deleteBtn}>Hapus</button>
           </div>
         )}
@@ -861,7 +892,7 @@ function QuestCard({ quest, me, adminMode, onSubmit, onApprove, onReject, onDele
             value={proof}
             onChange={(e) => setProof(e.target.value)}
             style={styles.input}
-            placeholder={disabled ? "Quest belum aktif / sudah expired" : "Masukkan link screenshot"}
+            placeholder={systemPaused ? "Sistem sedang pause all" : disabled ? "Quest belum aktif / sudah expired" : "Masukkan link screenshot"}
             disabled={disabled || quest.status === "submitted" || quest.status === "approved"}
           />
           <button
@@ -989,6 +1020,9 @@ const styles = {
   sideRow: { display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid rgba(255,231,186,.08)", fontFamily: "Inter, system-ui, sans-serif" },
   menuBtn: { width: "100%", textAlign: "left", padding: "13px 14px", marginBottom: 10, borderRadius: 16, border: "1px solid rgba(255,226,171,.16)", background: "linear-gradient(180deg, rgba(21,33,52,.72), rgba(16,25,39,.82))", color: "#f0e6d2", cursor: "pointer", fontWeight: 700, fontFamily: "Inter, system-ui, sans-serif", boxShadow: "inset 0 1px 0 rgba(255,255,255,.05)" },
   menuActive: { width: "100%", textAlign: "left", padding: "13px 14px", marginBottom: 10, borderRadius: 16, border: "1px solid rgba(255,227,167,.42)", background: "linear-gradient(90deg, rgba(241,219,155,.96), rgba(200,230,239,.92))", color: "#273349", cursor: "pointer", fontWeight: 900, fontFamily: "Inter, system-ui, sans-serif", boxShadow: "0 10px 24px rgba(248,214,124,.16)" },
+  pauseAllBtn: { width: "100%", padding: 12, marginBottom: 10, borderRadius: 14, border: "1px solid rgba(255,215,160,.35)", background: "linear-gradient(180deg, rgba(194,117,63,.96), rgba(132,63,45,.96))", color: "#fff4df", fontWeight: 900, cursor: "pointer", fontFamily: "Inter, system-ui, sans-serif" },
+  resumeAllBtn: { width: "100%", padding: 12, marginBottom: 10, borderRadius: 14, border: "1px solid rgba(205,235,215,.35)", background: "linear-gradient(180deg, rgba(79,133,96,.96), rgba(49,92,70,.96))", color: "#f2fff2", fontWeight: 900, cursor: "pointer", fontFamily: "Inter, system-ui, sans-serif" },
+  pauseBanner: { background: "linear-gradient(90deg, rgba(194,117,63,.96), rgba(132,63,45,.94))", color: "#fff4df", border: "1px solid rgba(255,225,180,.35)", borderRadius: 18, padding: "14px 18px", fontWeight: 900, fontFamily: "Inter, system-ui, sans-serif", boxShadow: "0 14px 34px rgba(0,0,0,.22)" },
   logoutBtn: { width: "100%", padding: 12, borderRadius: 14, border: "1px solid rgba(255,211,170,.2)", background: "linear-gradient(180deg, rgba(123,58,48,.95), rgba(91,34,31,.95))", color: "#fff1e8", fontWeight: 800, cursor: "pointer", fontFamily: "Inter, system-ui, sans-serif" },
   heroCard: { background: "linear-gradient(135deg, rgba(29,45,69,.82), rgba(19,31,49,.7))", borderRadius: 30, padding: 18, border: "1px solid rgba(255,232,188,.26)", boxShadow: "0 22px 50px rgba(10,14,22,.3), inset 0 1px 0 rgba(255,255,255,.08)", backdropFilter: "blur(12px)", position: "relative", overflow: "hidden" },
   heroTitle: { fontSize: 36, fontWeight: 700, marginBottom: 8, color: "#fff5df" },
@@ -1043,7 +1077,6 @@ const styles = {
   label: { display: "block", marginBottom: 8, color: "#f7e6bd", fontWeight: 700, fontFamily: "Inter, system-ui, sans-serif" },
   error: { marginTop: 10, marginBottom: 10, background: "rgba(140,71,67,.28)", color: "#ffe1da", padding: 10, borderRadius: 12, fontFamily: "Inter, system-ui, sans-serif", border: "1px solid rgba(255,217,214,.12)" },
   note: { marginTop: 14, color: "#cdd3de", fontSize: 13, fontFamily: "Inter, system-ui, sans-serif" },
-};
 
   questScreen: { display: "grid", gridTemplateColumns: "380px minmax(0, 1fr)", gap: 20, minHeight: "calc(100vh - 80px)" },
   questSidebar: { background: "linear-gradient(180deg, rgba(29,41,59,.88), rgba(12,19,31,.92))", borderRadius: 28, padding: 18, border: "1px solid rgba(255,228,173,.2)", boxShadow: "0 18px 48px rgba(8,12,22,.35), inset 0 1px 0 rgba(255,255,255,.05)", overflow: "auto" },
@@ -1082,6 +1115,8 @@ const styles = {
   questWarning: { position: "relative", zIndex: 1, maxWidth: 620, margin: "28px auto 0", padding: "16px 18px", borderRadius: 18, background: "linear-gradient(180deg, rgba(28,40,61,.96), rgba(17,24,37,.96))", border: "1px solid rgba(255,228,173,.3)", textAlign: "center", boxShadow: "0 18px 44px rgba(0,0,0,.34)" },
   questWarningTitle: { color: "#fff4d5", fontWeight: 800, lineHeight: 1.5, marginBottom: 8, fontFamily: "Inter, system-ui, sans-serif" },
   questWarningText: { color: "#d7deea", lineHeight: 1.6, fontFamily: "Inter, system-ui, sans-serif" },
+};
+
 const globalCss = `
   * { box-sizing: border-box; }
   html, body, #root { min-height: 100%; }
